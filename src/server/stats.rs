@@ -20,16 +20,21 @@ use actix_web::{
 
 use serde::Serialize;
 
+#[cfg(feature = "prometheus")]
+pub use super::prometheus::ToPrometheus;
+
 /// BaseStats contains BaseStatsInner singleton
 #[derive(Clone)]
-pub struct BaseStats(Arc<RwLock<BaseStatsInner>>);
+pub struct BaseStats(
+    pub(super) Arc<RwLock<BaseStatsInner>>
+);
 
 /// BetsStatsInner are common microservice statistics not tied to any special functionality
 #[derive(Clone, Serialize)]
 pub struct BaseStatsInner {
-    request_started: usize,
-    request_finished: usize,
-    status_codes: HashMap<u16, usize>,
+    pub(super) request_started: usize,
+    pub(super) request_finished: usize,
+    pub(super) status_codes: HashMap<u16, usize>,
 }
 
 impl Default for BaseStats {
@@ -74,6 +79,8 @@ impl Default for StatsWrapper {
         excludes.insert("/_healthcheck".to_string());
         excludes.insert("/_ready".to_string());
         excludes.insert("/_stats".to_string());
+        #[cfg(feature = "prometheus")]
+        excludes.insert("/_prometheus".to_string());
         Self::new(excludes)
     }
 }
@@ -190,7 +197,7 @@ pub fn default_healthcheck_handler() { }
 /// Default readiness handler
 pub fn default_readiness_handler<S, D>(service_data: web::Data<S>) -> impl Future<Item = HttpResponse, Error = Error>
 where
-    D: Serialize,
+    D: AppDataWrapper,
     S: StatsPresenter<D>,
 {
     let fut_res = service_data.is_ready()
@@ -207,7 +214,7 @@ where
 // Default stats handler
 pub fn default_stats_handler<S, D>(base_data: web::Data<BaseStats>, service_data: web::Data<S>) -> impl Future<Item = HttpResponse, Error = Error>
 where
-    D: Serialize,
+    D: AppDataWrapper,
     S: StatsPresenter<D>,
 {
     service_data.get_stats()
@@ -229,15 +236,38 @@ where
 
 #[derive(Serialize)]
 pub struct StatsOutput<D: Serialize> {
-    base: BaseStatsInner,
+    pub(super) base: BaseStatsInner,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    service: Option<D>,
+    pub(super) service: Option<D>,
 }
 
-pub trait StatsPresenter<D: Serialize> {
+pub trait StatsPresenter<D: AppDataWrapper> {
     fn is_ready(&self) -> Box<dyn Future<Item = bool, Error = Error>>;
     fn get_stats(&self) -> Box<dyn Future<Item = D, Error = Error>>;
+
+    #[cfg(feature = "prometheus")]
+    fn get_prometheus(&self) -> Box<dyn Future<Item=Vec<String>, Error=Error>> {
+        let fut = self.get_stats().map(|stats| stats.to_prometheus());
+        Box::new(fut)
+    }
 }
+
+#[cfg(feature = "prometheus")]
+pub trait AppDataWrapper: Serialize + ToPrometheus + 'static {}
+#[cfg(not(feature = "prometheus"))]
+pub trait AppDataWrapper: Serialize {}
+
+#[cfg(feature = "prometheus")]
+impl<T> AppDataWrapper for T
+where
+    T: Serialize + ToPrometheus + 'static
+{ }
+
+#[cfg(not(feature = "prometheus"))]
+impl<T> AppDataWrapper for T
+where
+    T: Serialize
+{ }
 
 // TODO unittests - see logger tests
