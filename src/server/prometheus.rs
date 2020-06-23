@@ -40,7 +40,7 @@ impl ToPrometheus for BaseStatsInner {
         out.push(format!("request_started {}", self.request_started));
         out.push(format!("request_finished {}", self.request_finished));
         for (code, value) in &self.status_codes {
-            out.push(format!("status_codes{{code={}}} {}", code, value));
+            out.push(format!("status_codes{{code=\"{}\"}} {}", code, value));
         }
         out
     }
